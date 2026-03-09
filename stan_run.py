@@ -55,6 +55,7 @@ for r in runs:
                 
                 #print("saving separate draws...")
                 os.mkdir(f"{fp}stan_output/{filename}")
+                os.mkdir(f"{fp}{filename}/")
                 mcmc.save_csvfiles(f"{fp}stan_output/{filename}")
                 
                 #for the draw files:
@@ -63,6 +64,7 @@ for r in runs:
                 for file in glob.glob(f"{fp}stan_output/{filename}/*.csv"):
                         df_files.append(file)
                         #print(file)
+                
                 
                 #for these files, compile them into dataframes of mu, sigma, beta and gamma
                 for file in df_files:
@@ -92,10 +94,10 @@ for r in runs:
                         gammas = pd.concat([gammas, gammas1])
                         
                 #save as csv files
-                mus.to_csv(f"{fp}{filename}_mu_vals.csv", index = False)
-                sigmas.to_csv(f"{fp}{filename}_sigma_vals.csv", index = False)
-                gammas.to_csv(f"{fp}{filename}_gamma_vals.csv", index = False)
-                betas.to_csv(f"{fp}{filename}_beta_vals.csv", index = False)     
+                mus.to_csv(f"{fp}{filename}/{filename}_mu_vals.csv", index = False)
+                sigmas.to_csv(f"{fp}{filename}/{filename}_sigma_vals.csv", index = False)
+                gammas.to_csv(f"{fp}{filename}/{filename}_gamma_vals.csv", index = False)
+                betas.to_csv(f"{fp}{filename}/{filename}_beta_vals.csv", index = False)     
 
 
             
