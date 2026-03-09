@@ -11,6 +11,3 @@ for file in glob.glob("*summary_stats.csv"):
     f_files = glob.glob(f"{f}*.csv")
     for ff in f_files:
         shutil.move(ff, f"{f}/{ff}")
-
-
-
