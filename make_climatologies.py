@@ -97,18 +97,21 @@ for year in range(1997, 2023):
     new_chla = xr.concat(all_points, dim = "lat")
     new_chla.to_netcdf(f"{fp}input_data/occci/regrid/occci_chla_{year}.nc")
 
+#%%
 #create monthly climatologies of chla using same process as SST
 #add all the new files into a lit
-chla_files = glob.glob("{fp}input_data/occci/regrid/*.nc")
 
+chla_files = glob.glob(f"{fp}input_data/occci/regrid/*.nc")
+
+years = []
 #make them into one big file now they are smaller (may take some time)
 for f in chla_files:
-    years = []
+    
     chlat = xr.open_dataset(f)["chlor_a"]
     years.append(chlat)
 chla_all = xr.concat(years, dim = "time")
 #limit to same range as SST
-chla_all = chla_all.sel(time = slice(dt.datetime(1997,9,1), dt.datetime(2022,7,1)))
+chla_all = chla_all.sel(time = slice(dt.datetime(1997,9,4), dt.datetime(2022,7,1)))
 
 #use same method as SST for monthly:
 for m in range(1,13):

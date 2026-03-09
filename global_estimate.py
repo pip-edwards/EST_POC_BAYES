@@ -3,43 +3,35 @@
 #make a global estimate for POC flux
 import pandas as pd
 import numpy as np
-import cartopy.crs as ccrs
-import cartopy.feature as cfeature
-import seaborn as sns
-import matplotlib.pyplot as plt#
 import os
-import matplotlib.colors as mcolors
-from cmcrameri import cm
-from scipy.stats import ks_2samp
-from scipy.stats import pearsonr
 import xarray as xr
-import cartopy.crs as ccrs
-import cartopy.feature as cfeature
-import datetime as dt
-import datetime as dt
 from pyproj import Geod
-from cmcrameri import cm
-from scipy.stats import gaussian_kde
-import glob
+
 fp = "/iridisfs/scratch/pe1n24/EST_POC_BAYES/"
 fp = "C:/Users/pe1n24/OneDrive - University of Southampton/EST_POC_BAYES/"
 
 #%%
-#make list of available files 
-files = []
+#make list of available files that have an rhat score close to one
 os.chdir(fp)
-for f in glob.glob(f"*_summary_stats.csv"):
-    files.append(f[:-18])
+files = []
+for f in os.listdir(fp):
+    if "_run" in f:
+        rhats = pd.read_csv(f"{f}/{f}_summary_stats.csv")
+        if 0.99 < np.mean(rhats["R_hat"]) < 1.01:
+            files.append(f)
+            print("ANALYSE:", f, np.mean(rhats["R_hat"]))
+        else:
+            print("DROPPED:", f, np.mean(rhats["R_hat"]))
 print(files)
 
 #%%
 #import sst and depth (Chla will be later)
 #import sst and depth and trasnform
 #NOTE I NEED TO CHECK WHERE THE SST COMES FROM/IS MADE
-depth = xr.open_dataset(f"")["mask100"]
+depth = xr.open_dataset(f"{fp}input_data/bathy/depth100_map.nc")["depth"]
 depth = depth.sortby("lat")
 depth = np.log(depth)
-sst_ntd = xr.open_dataset(f"")["SST"]
+sst_ntd = xr.open_dataset(f"{fp}input_data/sst/SST_overall_climatology.nc")["SST"]
 sst_ntd = np.log(sst_ntd + 1.79)
 
 #get lat and lon for plotting/mapping purposes
@@ -73,7 +65,7 @@ for f in files:
     mets, chl, _ = f.split("_")
     
     #import chla
-    chla_ntd = xr.open_dataset(f"")["chlor_a"]
+    chla_ntd = xr.open_dataset(f"{fp}input_data/occci/occci_overall_climatology.nc")["chlor_a"]
     #transform chla depending on dataset
     if chl == "ugchla":
         chla_ntd = np.log(chla_ntd * 1000)
@@ -85,8 +77,8 @@ for f in files:
     lons = sst_ntd["lon"]
 
     #open beta and gamma datasets 
-    betas = pd.read_csv(f"{fp}{f}_beta_vals.csv")
-    gammas = pd.read_csv(f"{fp}{f}_gamma_vals.csv")
+    betas = pd.read_csv(f"{fp}{f}/{f}_beta_vals.csv")
+    gammas = pd.read_csv(f"{fp}{f}/{f}_gamma_vals.csv")
     
     #set up vars for each gamma (to make code lines shorter)
     gamma1 = np.mean(gammas["gamma.1"])
@@ -123,7 +115,7 @@ for f in files:
     pocsum = pocsum/1000
     #to PgC
     pocsum = pocsum/(10**15)
-    print(pocsum)
+    print(f, np.round(pocsum.values,2))
 #%%
 #make global estimates with monthly weighting
 
