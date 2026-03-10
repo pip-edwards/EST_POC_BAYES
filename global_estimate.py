@@ -34,7 +34,6 @@ print(files)
 #%%
 #import sst and depth (Chla will be later)
 #import sst and depth and trasnform
-#NOTE I NEED TO CHECK WHERE THE SST COMES FROM/IS MADE
 depth = xr.open_dataset(f"{fp}input_data/bathy/depth100_map.nc")["depth"]
 depth = depth.sortby("lat")
 depth = np.log(depth)
@@ -202,3 +201,5 @@ for f in files:
         #multiply by the fraction of the year there is data
         allpocs = allpocs + (pocsum*month_frac)
     print(f, np.round(allpocs.values,2))
+
+# %%
