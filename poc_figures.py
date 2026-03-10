@@ -12,12 +12,10 @@ import os
 from cmcrameri import cm
 import glob
 import xarray as xr
-import cartopy.crs as ccrs
 import cartopy.feature as cfeature
-import datetime as dt
 from cmcrameri import cm
 from scipy.stats import linregress
-
+sns.set_context("paper")
 #set up fp
 fp = "C:/Users/pe1n24/OneDrive - University of Southampton/EST_POC_BAYES/"
 os.chdir(fp)
