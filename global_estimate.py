@@ -6,7 +6,7 @@ import numpy as np
 import os
 import xarray as xr
 from pyproj import Geod
-
+import glob
 fp = "/iridisfs/scratch/pe1n24/EST_POC_BAYES/"
 fp = "C:/Users/pe1n24/OneDrive - University of Southampton/EST_POC_BAYES/"
 
@@ -16,12 +16,19 @@ os.chdir(fp)
 files = []
 for f in os.listdir(fp):
     if "_run" in f:
-        rhats = pd.read_csv(f"{f}/{f}_summary_stats.csv")
-        if 0.99 < np.mean(rhats["R_hat"]) < 1.01:
-            files.append(f)
-            print("ANALYSE:", f, np.mean(rhats["R_hat"]))
+        #print(f)
+        sumstats = glob.glob(f"{f}/*summary_stats.csv")
+        #print(sumstats)
+        if len(sumstats) != 1:
+            print(f, "SOMETHING IS WRONG")
         else:
-            print("DROPPED:", f, np.mean(rhats["R_hat"]))
+            rhats = pd.read_csv(sumstats[0])
+            if 0.99 < np.mean(rhats["R_hat"]) < 1.01:
+                files.append(f)
+                print("ANALYSE:", f, np.mean(rhats["R_hat"]))
+            else:
+                print("DROPPED:", f, np.mean(rhats["R_hat"]))
+
 print(files)
 
 #%%
@@ -62,7 +69,9 @@ for i in range(len(lats)):
 #(this is not monthly weighted and just for having a look)
 for f in files:
     #split so you know how to potentially transform the data
-    mets, chl, _ = f.split("_")
+    parts = f.split("_")
+    met = parts[0]
+    chl = parts[1]
     
     #import chla
     chla_ntd = xr.open_dataset(f"{fp}input_data/occci/occci_overall_climatology.nc")["chlor_a"]
@@ -77,8 +86,8 @@ for f in files:
     lons = sst_ntd["lon"]
 
     #open beta and gamma datasets 
-    betas = pd.read_csv(f"{fp}{f}/{f}_beta_vals.csv")
-    gammas = pd.read_csv(f"{fp}{f}/{f}_gamma_vals.csv")
+    betas = pd.read_csv(glob.glob(f"{fp}{f}/*_beta_vals.csv")[0])
+    gammas = pd.read_csv(glob.glob(f"{fp}{f}/*_gamma_vals.csv")[0])
     
     #set up vars for each gamma (to make code lines shorter)
     gamma1 = np.mean(gammas["gamma.1"])
@@ -120,3 +129,76 @@ for f in files:
 #make global estimates with monthly weighting
 
 #set up how much each month is a fraction of the year
+def get_frac(month):
+    if month == 2:
+        return 28/365
+    elif month in [4,6,9,11]:
+       return 30/365
+    else:
+        return 31/365
+
+#run through each file for each month
+for f in files:
+    #print(f)
+    #split so you know how to potentially transform the data
+    parts = f.split("_")
+    met = parts[0]
+    chl = parts[1]
+
+    #open beta and gamma datasets 
+    betas = pd.read_csv(glob.glob(f"{fp}{f}/*_beta_vals.csv")[0])
+    gammas = pd.read_csv(glob.glob(f"{fp}{f}/*_gamma_vals.csv")[0])
+    
+    #set up vars for each gamma (to make code lines shorter)
+    gamma1 = np.mean(gammas["gamma.1"])
+    gamma2 = np.mean(gammas["gamma.2"])
+    gamma3 = np.mean(gammas["gamma.3"])
+    gamma4 = np.mean(gammas["gamma.4"])
+    gamma5 = np.mean(gammas["gamma.5"])
+    gamma6 = np.mean(gammas["gamma.6"])
+    gamma7 = np.mean(gammas["gamma.7"])
+
+    beta1 = np.mean(betas["beta.1"])
+    beta2 = np.mean(betas["beta.2"])
+    beta3 = np.mean(betas["beta.3"])
+    beta4 = np.mean(betas["beta.4"])
+    beta5 = np.mean(betas["beta.5"])
+    beta6 = np.mean(betas["beta.6"])
+    beta7 = np.mean(betas["beta.7"])
+
+    #set up a sum value to add to
+    allpocs = 0
+    
+    #for each month
+    for m in range(1,13):
+        #import chla
+        chla_ntd = xr.open_dataset(f"{fp}input_data/occci/{m}_occci_monthly_regrid.nc")["chlor_a"]
+        #transform chla depending on dataset
+        if chl == "ugchla":
+            chla_ntd = np.log(chla_ntd * 1000)
+        else:
+            chla_ntd = np.log(chla_ntd)
+
+        #import sst
+        sst_ntd = xr.open_dataset(f"{fp}input_data/sst/SST_{m}_monthly_climatology.nc")["SST"]
+        sst_ntd = np.log((sst_ntd + float(1.79)))
+
+        mumap = beta1*np.ones((180,360)) + sst_ntd*beta2 + chla_ntd*beta3 + depth*beta4 + sst_ntd*chla_ntd*beta5 + sst_ntd*depth*beta6 + chla_ntd*depth*beta7
+        sigmap =  gamma1*np.ones((180,360)) + sst_ntd*gamma2 + chla_ntd*gamma3 + depth*gamma4 + sst_ntd*chla_ntd*gamma5 + sst_ntd*depth*gamma6 + chla_ntd*depth*gamma7
+        pocmap = mumap + (sigmap**2)/2
+
+        month_frac = get_frac(m)
+        pocs = np.exp(pocmap)
+        #times by cell area in m2 (mgC/m^2)
+        areapocs = pocs * cell_area
+        #times for 365 it is there to make yearly (mgC/m2/day)
+        aypocs = areapocs*365
+        #sum for the globe
+        pocsum = np.sum(aypocs)
+        #to gC
+        pocsum = pocsum/1000
+        #to PgC
+        pocsum = pocsum/(10**15)
+        #multiply by the fraction of the year there is data
+        allpocs = allpocs + (pocsum*month_frac)
+    print(f, np.round(allpocs.values,2))
