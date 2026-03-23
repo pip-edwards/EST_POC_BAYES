@@ -1,0 +1,369 @@
+#%%
+
+#make a global estimate for POC flux
+import pandas as pd
+import numpy as np
+import os
+import xarray as xr
+from pyproj import Geod
+import seaborn as sns
+import pandas as pd
+import numpy as np
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import matplotlib.pyplot as plt
+import os
+from cmcrameri import cm
+import glob
+import xarray as xr
+import cartopy.feature as cfeature
+from cmcrameri import cm
+from scipy.stats import linregress
+import matplotlib.pyplot as plt
+import glob
+fp = "/iridisfs/scratch/pe1n24/EST_POC_BAYES/"
+fp = "C:/Users/pe1n24/OneDrive - University of Southampton/EST_POC_BAYES/"
+
+#%%
+#make list of available files that have an rhat score close to one
+os.chdir(fp)
+files = []
+for f in os.listdir(fp):
+    #if "_run" in f:
+    if "1103" in f:
+        #print(f)
+        sumstats = glob.glob(f"{f}/*summary_stats.csv")
+        #print(sumstats)
+        if len(sumstats) != 1:
+            print(f, "SOMETHING IS WRONG")
+        else:
+            rhats = pd.read_csv(sumstats[0])
+            if 0.99 < np.mean(rhats["R_hat"]) < 1.01:
+                files.append(f)
+                print("ANALYSE:", f, np.mean(rhats["R_hat"]))
+            else:
+                print("DROPPED:", f, np.mean(rhats["R_hat"]))
+
+print(files)
+
+#%%
+#import sst and depth (Chla will be later)
+#import sst and depth and trasnform
+depth = xr.open_dataset(f"{fp}input_data/bathy/depth100_map.nc")["depth"]
+depth = depth.sortby("lat")
+depth = np.log(depth)
+sst_ntd = xr.open_dataset(f"{fp}input_data/sst/SST_overall_climatology.nc")["SST"]
+sst_ntd = np.log(sst_ntd + 1.79)
+
+#get lat and lon for plotting/mapping purposes
+lats = sst_ntd["lat"]
+lons = sst_ntd["lon"]
+#%%
+#Calculate the area of each 1o cell
+#select geoid
+g = Geod(ellps = "WGS84") #this is the standard/most accurate eath model
+
+
+#set up an empty cell area array
+cell_area = np.zeros(((len(lats)), len(lons)))
+for i in range(len(lats)):
+    lat = lats[i]
+    #print(lat)
+    for j in range(len(lons)):
+        lon = lons[j]
+        latcell = [lat-0.5, lat-0.5, lat+0.5, lat+0.5, lat-0.5]
+        loncell = [lon-0.5, lon+0.5, lon+0.5, lon-0.5, lon-0.5]  
+        area, _  = g.polygon_area_perimeter(loncell,latcell)
+        cell_area[i,j] = area
+
+#%%
+
+#for each file, generate a global POC estimate 
+#(this is not monthly weighted and just for having a look)
+for f in files:
+    #split so you know how to potentially transform the data
+    parts = f.split("_")
+    met = parts[0]
+    chl = parts[1]
+    
+    #import chla
+    chla_ntd = xr.open_dataset(f"{fp}input_data/occci/occci_overall_climatology.nc")["chlor_a"]
+    #transform chla depending on dataset
+    if chl == "ugchla":
+        chla_ntd = np.log(chla_ntd * 1000)
+    else:
+        chla_ntd = np.log(chla_ntd)
+
+    #set up lats and lons for mapping purposes
+    lats = sst_ntd["lat"]
+    lons = sst_ntd["lon"]
+
+    #open beta and gamma datasets 
+    betas = pd.read_csv(glob.glob(f"{fp}{f}/*_beta_vals.csv")[0])
+    gammas = pd.read_csv(glob.glob(f"{fp}{f}/*_gamma_vals.csv")[0])
+    
+    #set up vars for each gamma (to make code lines shorter)
+    gamma1 = np.mean(gammas["gamma.1"])
+    gamma2 = np.mean(gammas["gamma.2"])
+    gamma3 = np.mean(gammas["gamma.3"])
+    gamma4 = np.mean(gammas["gamma.4"])
+    gamma5 = np.mean(gammas["gamma.5"])
+    gamma6 = np.mean(gammas["gamma.6"])
+    gamma7 = np.mean(gammas["gamma.7"])
+
+    beta1 = np.mean(betas["beta.1"])
+    beta2 = np.mean(betas["beta.2"])
+    beta3 = np.mean(betas["beta.3"])
+    beta4 = np.mean(betas["beta.4"])
+    beta5 = np.mean(betas["beta.5"])
+    beta6 = np.mean(betas["beta.6"])
+    beta7 = np.mean(betas["beta.7"])
+
+    #make distribution for mu, sigma and mean poc
+    mumap = beta1*np.ones((180,360)) + sst_ntd*beta2 + chla_ntd*beta3 + depth*beta4 + sst_ntd*chla_ntd*beta5 + sst_ntd*depth*beta6 + chla_ntd*depth*beta7
+    sigmap =  gamma1*np.ones((180,360)) + sst_ntd*gamma2 + chla_ntd*gamma3 + depth*gamma4 + sst_ntd*chla_ntd*gamma5 + sst_ntd*depth*gamma6 + chla_ntd*depth*gamma7
+    pocmap = mumap + (sigmap**2)/2
+
+    #to make globally integrated mean poc estimate 
+    #take out of log-space
+    pocs = np.exp(pocmap)
+    #times by cell area in m2 (mgC/m^2)
+    areapocs = pocs * cell_area
+    #times for each day to make yearly (mgC/m2/day)
+    aypocs = areapocs*365
+    #sum for the globe
+    pocsum = np.sum(aypocs)
+    #to gC
+    pocsum = pocsum/1000
+    #to PgC
+    pocsum = pocsum/(10**15)
+    print(f, np.round(pocsum.values,2))
+
+    fig = plt.figure(figsize=(10, 6), dpi = 300)
+    ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
+    ax.set_global()
+    ax.coastlines('110m', alpha=0.1)
+    ax.gridlines(draw_labels = True, linestyle = "--", color = "#B3B3B3")
+
+    #MEAN POC map
+    pocrange = np.arange(2.8, 6, 0.4)
+    contour = ax.contourf(lons, lats, pocmap, transform=ccrs.PlateCarree(),
+                        cmap= cm.lipari,extend = "both", levels = pocrange)
+#%%
+#make global estimates with monthly weighting
+
+#set up how much each month is a fraction of the year
+def get_frac(month):
+    if month == 2:
+        return 28/365
+    elif month in [4,6,9,11]:
+       return 30/365
+    else:
+        return 31/365
+
+#run through each file for each month
+for f in files:
+    #print(f)
+    #split so you know how to potentially transform the data
+    parts = f.split("_")
+    met = parts[0]
+    chl = parts[1]
+
+    #open beta and gamma datasets 
+    betas = pd.read_csv(glob.glob(f"{fp}{f}/*_beta_vals.csv")[0])
+    gammas = pd.read_csv(glob.glob(f"{fp}{f}/*_gamma_vals.csv")[0])
+    
+    #set up vars for each gamma (to make code lines shorter)
+    gamma1 = np.mean(gammas["gamma.1"])
+    gamma2 = np.mean(gammas["gamma.2"])
+    gamma3 = np.mean(gammas["gamma.3"])
+    gamma4 = np.mean(gammas["gamma.4"])
+    gamma5 = np.mean(gammas["gamma.5"])
+    gamma6 = np.mean(gammas["gamma.6"])
+    gamma7 = np.mean(gammas["gamma.7"])
+
+    beta1 = np.mean(betas["beta.1"])
+    beta2 = np.mean(betas["beta.2"])
+    beta3 = np.mean(betas["beta.3"])
+    beta4 = np.mean(betas["beta.4"])
+    beta5 = np.mean(betas["beta.5"])
+    beta6 = np.mean(betas["beta.6"])
+    beta7 = np.mean(betas["beta.7"])
+
+    #set up a sum value to add to
+    allpocs = 0
+    
+    #for each month
+    for m in range(1,13):
+        #import chla
+        chla_ntd = xr.open_dataset(f"{fp}input_data/occci/{m}_occci_monthly_regrid.nc")["chlor_a"]
+        #transform chla depending on dataset
+        if chl == "ugchla":
+            chla_ntd = np.log(chla_ntd * 1000)
+        else:
+            chla_ntd = np.log(chla_ntd)
+
+        #import sst
+        sst_ntd = xr.open_dataset(f"{fp}input_data/sst/SST_{m}_monthly_climatology.nc")["SST"]
+        sst_ntd = np.log((sst_ntd + float(1.79)))
+
+        mumap = beta1*np.ones((180,360)) + sst_ntd*beta2 + chla_ntd*beta3 + depth*beta4 + sst_ntd*chla_ntd*beta5 + sst_ntd*depth*beta6 + chla_ntd*depth*beta7
+        sigmap =  gamma1*np.ones((180,360)) + sst_ntd*gamma2 + chla_ntd*gamma3 + depth*gamma4 + sst_ntd*chla_ntd*gamma5 + sst_ntd*depth*gamma6 + chla_ntd*depth*gamma7
+        pocmap = mumap + (sigmap**2)/2
+
+        month_frac = get_frac(m)
+        pocs = np.exp(pocmap)
+        #times by cell area in m2 (mgC/m^2)
+        areapocs = pocs * cell_area
+        #times for 365 it is there to make yearly (mgC/m2/day)
+        aypocs = areapocs*365
+        #sum for the globe
+        pocsum = np.sum(aypocs)
+        #to gC
+        pocsum = pocsum/1000
+        #to PgC
+        pocsum = pocsum/(10**15)
+        #multiply by the fraction of the year there is data
+        allpocs = allpocs + (pocsum*month_frac)
+    print(f, np.round(allpocs.values,2))
+
+# %%
+#This is the ugly loop to get the histograms of overall POC flux
+#:D
+#I could definitley optimise this
+#but optimising is a step i haven't gotten to yet.
+
+#REMEMBER ONLY RUN THIS OVERNIGHT IT WILL KILL YOUR LAPTOP PIPPA!!!!!!!!
+
+#reimport depth just because
+depth = xr.open_dataset(f"{fp}input_data/bathy/depth100_map.nc")["depth"]
+depth = depth.sortby("lat")
+depth = np.log(depth)
+
+#run through each file for each month
+for f in files:
+    #print(f)
+    #split so you know how to potentially transform the data
+    parts = f.split("_")
+    met = parts[0]
+    chl = parts[1]
+
+    #open beta and gamma datasets 
+    betas = pd.read_csv(glob.glob(f"{fp}{f}/*_beta_vals.csv")[0])
+    gammas = pd.read_csv(glob.glob(f"{fp}{f}/*_gamma_vals.csv")[0])
+
+    #set up a sum value to add to (these need to be arrays because im getting a mean for each one)
+    pocalls = np.zeros(8000)
+    mualls =np.zeros(8000)
+    sigexpalls = np.zeros(8000)
+    sigalls = np.zeros(8000)
+    
+    #for each month
+    for m in range(1,13):
+        #get the month fraction
+        month_frac = get_frac(m)
+
+        #import chla
+        chla_ntd = xr.open_dataset(f"{fp}input_data/occci/{m}_occci_monthly_regrid.nc")["chlor_a"]
+        #transform chla depending on dataset
+        if chl == "ugchla":
+            chla_ntd = np.log(chla_ntd * 1000)
+        else:
+            chla_ntd = np.log(chla_ntd)
+
+        #import sst
+        sst_ntd = xr.open_dataset(f"{fp}input_data/sst/SST_{m}_monthly_climatology.nc")["SST"]
+        sst_ntd = np.log((sst_ntd + float(1.79)))
+
+        #(depth doesnt change)
+
+        #set up empty dataframes for each month to add 8000 datapoints to
+        allpocs = []
+        allmus = []
+        allsigs = []
+        #cycle through each 8000 rows for beta and gamma
+        for n in range(8000):
+        #print(n)
+        
+            #select the row 
+            b = betas.loc[n]
+            g = gammas.loc[n]
+            #use this to build estimate of mu, sig and mean POC flux at 100m
+            mumap = b[0]*np.ones((180,360)) + sst_ntd*b[1] + chla_ntd*b[2] + depth*b[3] + sst_ntd*chla_ntd*b[4] +sst_ntd*depth*b[5]+ chla_ntd*depth*b[6] 
+            sigmap =  g[0]*np.ones((180,360)) + sst_ntd*g[1] + chla_ntd*g[2] + depth*g[3] + sst_ntd*chla_ntd*g[4] +sst_ntd*depth*g[5]+ chla_ntd*depth*g[6] 
+            pocmap = mumap + (sigmap**2)/2
+
+            #make a globally integrated mu estimate
+            #take out of logspace
+            mus = np.exp(mumap)
+            #times by cell area in m2
+            areamus = mus * cell_area
+            #make yearly
+            aymus = areamus*365
+            #sum for globe
+            musum = np.sum(aymus)
+            #to grams
+            musum = musum/1000
+            #to petegrams
+            musum = musum/(10**15)
+            #add to list
+            allmus.append(musum)
+
+            #make a globally integrated sigma estimate
+            #take out of logspace
+            sigs = np.exp(sigmap)
+            #times by cell area in m2
+            areasigs = sigs * cell_area
+            #make yearly
+            aysigs = areasigs*365
+            #sum for globe
+            sigsum = np.sum(aysigs)
+            #to grams
+            sigsum = sigsum/1000
+            #to petagrams
+            sigsum = sigsum/(10**15)
+            #append to list
+            allsigs.append(sigsum)
+
+            #make a globally integrated mean estimate
+            #take out of logspace
+            pocs = np.exp(pocmap)
+            #times by cell area in m2 (mgC/m^2)
+            areapocs = pocs * cell_area
+            #times for 365 it is there to make yearly (mgC/m2/day)
+            aypocs = areapocs*365
+            #sum for the globe
+            pocsum = np.sum(aypocs)
+            #to gC
+            pocsum = pocsum/1000
+            #to PgC
+            pocsum = pocsum/(10**15)
+            #append to list of summed pocs
+            allpocs.append(pocsum)
+
+        #make each list an array and times by monthly fraction
+        allpocs = np.array(allpocs) *month_frac
+        allmus = np.array(allmus) *month_frac
+        allsigs = np.array(allsigs) *month_frac
+
+        #add the monthly fraction to the global fraction
+        pocalls = pocalls + (allpocs)
+        mualls = mualls + (allmus)
+        sigalls = sigalls + (allsigs)
+    
+    #make a plot to visually represent this
+        
+    fig, ax = plt.subplots(3,1)
+    fig.suptitle(f)
+    fig.tight_layout(h_pad = 1.2)
+    ax[0].hist(pocalls)
+    ax[0].set_title(f"poc, mean = {np.round(np.mean(pocalls),3)}, sd={np.round(np.std(pocalls),3)}")
+
+    ax[1].hist(mualls)
+    ax[1].set_title(f"mu, mean = {np.round(np.mean(mualls),3)}, sd={np.round(np.std(mualls),3)}")
+
+    ax[2].hist(sigalls)
+    ax[2].set_title(f"sig, mean = {np.round(np.mean(sigalls),3)}, sd={np.round(np.std(sigalls),3)}")
+    if not os.path.isdir(f"{fp}/hpcfigs/{f}"):
+            os.makedirs(f"{fp}/hpcfigs/{f}")
+    plt.savefig(f"{fp}/hpcfigs/{f}/global_poc_est.png")
