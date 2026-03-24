@@ -21,8 +21,7 @@ from cmcrameri import cm
 from scipy.stats import linregress
 import matplotlib.pyplot as plt
 import glob
-fp = "/iridisfs/scratch/pe1n24/EST_POC_BAYES/"
-fp = "C:/Users/pe1n24/OneDrive - University of Southampton/EST_POC_BAYES/"
+fp = ""
 
 #%%
 #make list of available files that have an rhat score close to one
